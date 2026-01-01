@@ -369,14 +369,75 @@ async function scrapeSource(source: PropertySource, city: string): Promise<Scrap
 async function scrapePrivateProperty(city: string): Promise<ScrapedProperty[]> {
   const properties: ScrapedProperty[] = [];
   const baseUrl = 'https://www.privateproperty.co.za';
-  const searchUrl = `${baseUrl}/to-rent/${city}`;
+  const searchUrl = `${baseUrl}/to-rent`;
   const maxPages = 2; // Limit pages for Edge Function timeout
 
   try {
     console.log(`[PrivateProperty] Starting scrape for city: ${city}`);
     
+    // Try different URL patterns to find a working one
+    const urlPatterns = [
+      `${searchUrl}/${city}`, // /to-rent/cape-town
+      `${searchUrl}/${city}/`, // /to-rent/cape-town/
+      `${baseUrl}/to-rent/${city}`, // Full URL
+      `${baseUrl}/to-rent/western-cape/${city}`, // With province
+      `${searchUrl}?location=${city}`, // Query param
+      `${searchUrl}`, // Just base search URL
+    ];
+    
+    let workingUrl: string | null = null;
+    
+    // Test URL patterns for page 1
+    console.log(`[PrivateProperty] Testing URL patterns for city: ${city}`);
+    for (const testUrl of urlPatterns) {
+      try {
+        console.log(`[PrivateProperty] Trying URL: ${testUrl}`);
+        const testResponse = await fetch(testUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': baseUrl,
+          },
+        });
+        
+        if (testResponse.ok) {
+          const html = await testResponse.text();
+          // Check if the page has property listings (basic check)
+          if (html.length > 10000 && (html.includes('property') || html.includes('listing') || html.includes('rent'))) {
+            workingUrl = testUrl;
+            console.log(`[PrivateProperty] Found working URL: ${testUrl}`);
+            break;
+          }
+        }
+      } catch {
+        // Continue to next pattern
+        continue;
+      }
+    }
+    
+    if (!workingUrl) {
+      console.error(`[PrivateProperty] Could not find valid URL pattern for city: ${city}`);
+      return properties;
+    }
+    
     for (let page = 1; page <= maxPages; page++) {
-      const url = `${searchUrl}?page=${page}`;
+      let url: string;
+      if (page === 1 && workingUrl) {
+        url = workingUrl;
+      } else if (page === 1) {
+        url = `${searchUrl}/${city}`;
+      } else {
+        // Properly construct pagination URL
+        const baseUrlForPage = workingUrl || `${searchUrl}/${city}`;
+        // Check if baseUrl already has query parameters
+        if (baseUrlForPage.includes('?')) {
+          url = `${baseUrlForPage}&page=${page}`;
+        } else {
+          url = `${baseUrlForPage}?page=${page}`;
+        }
+      }
+      
       console.log(`[PrivateProperty] Fetching page ${page}: ${url}`);
       
       const response = await fetch(url, {
@@ -464,14 +525,76 @@ async function scrapePrivateProperty(city: string): Promise<ScrapedProperty[]> {
 async function scrapeProperty24(city: string): Promise<ScrapedProperty[]> {
   const properties: ScrapedProperty[] = [];
   const baseUrl = 'https://www.property24.com';
-  const searchUrl = `${baseUrl}/to-rent/${city}`;
+  const searchUrl = `${baseUrl}/to-rent`;
   const maxPages = 2;
 
   try {
     console.log(`[Property24] Starting scrape for city: ${city}`);
     
+    // Try different URL patterns to find a working one
+    const urlPatterns = [
+      `${searchUrl}/${city}`, // /to-rent/cape-town
+      `${searchUrl}/${city}/`, // /to-rent/cape-town/
+      `${baseUrl}/to-rent/${city}`, // Full URL
+      `${baseUrl}/to-rent/western-cape/${city}`, // With province
+      `${searchUrl}?location=${city}`, // Query param
+      `${searchUrl}`, // Just base search URL
+    ];
+    
+    let workingUrl: string | null = null;
+    
+    // Test URL patterns for page 1
+    console.log(`[Property24] Testing URL patterns for city: ${city}`);
+    for (const testUrl of urlPatterns) {
+      try {
+        console.log(`[Property24] Trying URL: ${testUrl}`);
+        const testResponse = await fetch(testUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': baseUrl,
+          },
+        });
+        
+        if (testResponse.ok) {
+          const html = await testResponse.text();
+          // Check if the page has property listings (basic check)
+          if (html.length > 10000 && (html.includes('property') || html.includes('listing') || html.includes('rent'))) {
+            workingUrl = testUrl;
+            console.log(`[Property24] Found working URL: ${testUrl}`);
+            break;
+          }
+        }
+      } catch {
+        // Continue to next pattern
+        continue;
+      }
+    }
+    
+    if (!workingUrl) {
+      console.error(`[Property24] Could not find valid URL pattern for city: ${city}`);
+      return properties;
+    }
+    
     for (let page = 1; page <= maxPages; page++) {
-      const url = `${searchUrl}?page=${page}`;
+      let url: string;
+      if (page === 1 && workingUrl) {
+        url = workingUrl;
+      } else if (page === 1) {
+        url = `${searchUrl}/${city}`;
+      } else {
+        // Properly construct pagination URL
+        const baseUrlForPage = workingUrl || `${searchUrl}/${city}`;
+        // Check if baseUrl already has query parameters
+        if (baseUrlForPage.includes('?')) {
+          url = `${baseUrlForPage}&page=${page}`;
+        } else {
+          // For path-based URLs, use /p2 pattern
+          url = `${baseUrlForPage}/p${page}`;
+        }
+      }
+      
       console.log(`[Property24] Fetching page ${page}: ${url}`);
       
       const response = await fetch(url, {
