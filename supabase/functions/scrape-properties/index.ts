@@ -62,6 +62,217 @@ function parsePrice(priceText: string): number | null {
   return isNaN(price) ? null : price;
 }
 
+// Helper function to extract price from JSON/JavaScript data
+function extractPriceFromJson(jsonData: any, path: string[] = []): number | null {
+  if (jsonData === null || jsonData === undefined) return null;
+  
+  // Check if current object has price-related fields
+  const priceFields = ['price', 'rent', 'rentalPrice', 'amount', 'cost', 'monthlyRent', 'weeklyRent', 'dailyRent'];
+  for (const field of priceFields) {
+    if (jsonData[field] !== undefined && jsonData[field] !== null) {
+      const value = jsonData[field];
+      if (typeof value === 'number' && value > 0) {
+        return value;
+      }
+      if (typeof value === 'string') {
+        const parsed = parsePrice(value);
+        if (parsed !== null && parsed > 0) {
+          return parsed;
+        }
+      }
+      if (typeof value === 'object' && value.value) {
+        const parsed = parsePrice(String(value.value));
+        if (parsed !== null && parsed > 0) {
+          return parsed;
+        }
+      }
+    }
+  }
+
+  // Recursively search in nested objects (limit depth to avoid infinite loops)
+  if (path.length < 5 && typeof jsonData === 'object' && !Array.isArray(jsonData)) {
+    for (const key in jsonData) {
+      if (jsonData.hasOwnProperty(key)) {
+        const result = extractPriceFromJson(jsonData[key], [...path, key]);
+        if (result !== null && result > 0) {
+          return result;
+        }
+      }
+    }
+  }
+
+  // Search in arrays
+  if (Array.isArray(jsonData) && path.length < 5) {
+    for (const item of jsonData) {
+      const result = extractPriceFromJson(item, path);
+      if (result !== null && result > 0) {
+        return result;
+      }
+    }
+  }
+
+  return null;
+}
+
+// Helper function to extract price from JavaScript/JSON embedded in HTML
+function extractPriceFromJavaScript(html: string): number | null {
+  // Try to extract JSON from script tags
+  const scriptPatterns = [
+    /<script[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/gi,
+    /<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi,
+    /<script[^>]*>[\s\S]*?window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?});[\s\S]*?<\/script>/gi,
+    /<script[^>]*>[\s\S]*?window\.__NEXT_DATA__\s*=\s*({[\s\S]*?});[\s\S]*?<\/script>/gi,
+    /<script[^>]*>[\s\S]*?__INITIAL_PROPS__\s*=\s*({[\s\S]*?});[\s\S]*?<\/script>/gi,
+  ];
+
+  for (const pattern of scriptPatterns) {
+    const matches = html.matchAll(pattern);
+    for (const match of matches) {
+      if (match[1]) {
+        try {
+          const jsonData = JSON.parse(match[1]);
+          const price = extractPriceFromJson(jsonData);
+          if (price !== null && price > 0) {
+            return price;
+          }
+        } catch (e) {
+          // Not valid JSON, continue
+        }
+      }
+    }
+  }
+
+  // Try to find JavaScript variables with price data
+  // Prioritize patterns that handle space-separated thousands (SA format)
+  const jsVarPatterns = [
+    // Pattern 1: Space-separated thousands (R16 000)
+    /(?:price|rent|rentalPrice|amount)\s*[:=]\s*["']?R?\s*(\d{1,3}(?:\s+\d{3})+)["']?/gi,
+    // Pattern 2: Comma-separated thousands (R16,000)
+    /(?:price|rent|rentalPrice|amount)\s*[:=]\s*["']?R?\s*(\d{1,3}(?:,\d{3})+)["']?/gi,
+    // Pattern 3: Numeric value (no formatting)
+    /(?:price|rent|rentalPrice|amount)\s*[:=]\s*(\d+(?:\.\d+)?)/gi,
+    // Pattern 4: JSON format with space-separated thousands
+    /"price"\s*:\s*["']?R?\s*(\d{1,3}(?:\s+\d{3})+)["']?/gi,
+    /"rent"\s*:\s*["']?R?\s*(\d{1,3}(?:\s+\d{3})+)["']?/gi,
+    /"amount"\s*:\s*["']?R?\s*(\d{1,3}(?:\s+\d{3})+)["']?/gi,
+    // Pattern 5: JSON format with comma-separated thousands
+    /"price"\s*:\s*["']?R?\s*(\d{1,3}(?:,\d{3})+)["']?/gi,
+    /"rent"\s*:\s*["']?R?\s*(\d{1,3}(?:,\d{3})+)["']?/gi,
+    /"amount"\s*:\s*["']?R?\s*(\d{1,3}(?:,\d{3})+)["']?/gi,
+    // Pattern 6: Fallback - any digits with spaces or commas
+    /(?:price|rent|rentalPrice|amount)\s*[:=]\s*["']?R?\s*([\d\s,]+)["']?/gi,
+    /"price"\s*:\s*["']?R?\s*([\d\s,]+)["']?/gi,
+    /"rent"\s*:\s*["']?R?\s*([\d\s,]+)["']?/gi,
+    /"amount"\s*:\s*["']?R?\s*([\d\s,]+)["']?/gi,
+  ];
+
+  for (const pattern of jsVarPatterns) {
+    const matches = html.matchAll(pattern);
+    for (const match of matches) {
+      if (match[1]) {
+        const price = parsePrice(match[1]);
+        if (price !== null && price > 0) {
+          return price;
+        }
+      }
+    }
+  }
+
+  // Look for unescaped JSON in script tags (common in React apps)
+  const unescapedJsonPattern = /<script[^>]*>[\s\S]*?({[\s\S]{100,10000}?"price"[\s\S]*?})[\s\S]*?<\/script>/gi;
+  const unescapedMatches = html.matchAll(unescapedJsonPattern);
+  for (const match of unescapedMatches) {
+    if (match[1]) {
+      try {
+        // Try to extract just the price value from the JSON-like structure
+        // Prioritize space-separated thousands (SA format)
+        const pricePatterns = [
+          /"price"\s*:\s*["']?R?\s*(\d{1,3}(?:\s+\d{3})+)["']?/i,  // Space-separated
+          /"price"\s*:\s*["']?R?\s*(\d{1,3}(?:,\d{3})+)["']?/i,     // Comma-separated
+          /"price"\s*:\s*["']?R?\s*([\d\s,]+)["']?/i,               // Fallback
+        ];
+        
+        for (const pricePattern of pricePatterns) {
+          const priceMatch = match[1].match(pricePattern);
+          if (priceMatch && priceMatch[1]) {
+            const price = parsePrice(priceMatch[1]);
+            if (price !== null && price > 0) {
+              return price;
+            }
+          }
+        }
+      } catch (e) {
+        // Continue searching
+      }
+    }
+  }
+
+  return null;
+}
+
+// Helper function to extract price from HTML using multiple patterns
+function extractPrice(html: string): number | null {
+  // First, try to extract from JavaScript/JSON data
+  const jsonPrice = extractPriceFromJavaScript(html);
+  if (jsonPrice !== null && jsonPrice > 0) {
+    return jsonPrice;
+  }
+
+  // Then try HTML patterns - ordered from most specific to least specific
+  // Priority: patterns that handle space-separated thousands (SA format) first
+  const pricePatterns = [
+    // Pattern 1: R followed by digits with space-separated thousands (R16 000, R1 500 000)
+    // This handles South African price formatting with spaces as thousands separators
+    /R\s*(\d{1,3}(?:\s+\d{3})+(?:\s+\d{3})*)/i,
+    // Pattern 2: R followed by digits with comma-separated thousands (R16,000, R1,500,000)
+    /R\s*(\d{1,3}(?:,\d{3})+(?:,\d{3})*)/i,
+    // Pattern 3: Inside price-related HTML elements (class or id containing "price")
+    // Match space or comma separated thousands
+    /<[^>]*(?:class|id)="[^"]*price[^"]*"[^>]*>.*?R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/is,
+    // Pattern 4: R followed by digits with frequency indicator (handles spaces)
+    /R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))\s*(?:per\s*(month|week|day)|pm|pw|pd|p\/m|p\/w|p\/d)/i,
+    // Pattern 5: Price in span/div with price class (more specific, handles spaces)
+    /<(?:span|div|p|h[1-6])[^>]*class="[^"]*price[^"]*"[^>]*>[\s\S]*?R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/is,
+    // Pattern 6: Price with thousands separator (R 12,500 or R12,500 or R 12 500)
+    /R\s*(\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?)/i,
+    // Pattern 7: Price label format (rent: R12,500 or rent: R12 500)
+    /(?:rent|price)[^:]*:?\s*R?\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/i,
+    // Pattern 8: Price in data attributes (data-price, data-rent, etc.)
+    /(?:data-price|data-rent|data-cost)="[^"]*R?\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"/i,
+    // Pattern 9: Price in meta tags
+    /<meta[^>]*(?:property|name)="[^"]*price[^"]*"[^>]*content="[^"]*R?\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"/i,
+    // Pattern 10: Price in JSON-LD structured data
+    /"price"[^:]*:\s*"?R?\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"?/i,
+    // Pattern 11: Currency symbol variations (fallback - less specific)
+    /(?:R|ZAR|R\s*)\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/i,
+    // Pattern 12: Basic R followed by digits (last resort - most common but least specific)
+    // Only use this if no thousands separators found
+    /R\s*(\d{4,})/i,  // Only match 4+ digits to avoid matching "R16" when "R16 000" exists
+  ];
+
+  // Collect all matches and prefer the longest one (most complete price)
+  const matches: { price: number; length: number }[] = [];
+  
+  for (const pattern of pricePatterns) {
+    const match = html.match(pattern);
+    if (match && match[1]) {
+      const priceText = match[1].trim();
+      const price = parsePrice(priceText);
+      if (price !== null && price > 0) {
+        matches.push({ price, length: priceText.length });
+      }
+    }
+  }
+
+  // Return the longest match (most complete price) or the first valid one
+  if (matches.length > 0) {
+    matches.sort((a, b) => b.length - a.length); // Sort by length descending
+    return matches[0].price;
+  }
+
+  return null;
+}
+
 // Helper function to clean HTML text
 function cleanText(text: string): string {
   return text
@@ -248,15 +459,25 @@ async function scrapePropertyDetail(url: string, source: PropertySource, baseUrl
     const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>|<title>([^<]+)<\/title>/i);
     const title = cleanText(titleMatch?.[1] || titleMatch?.[2] || '');
 
-    // Extract price
-    const priceMatch = html.match(/R\s*([\d\s,]+)\s*(?:per\s*(month|week|day)|pm|pw|pd)/i) 
-      || html.match(/R\s*([\d\s,]+)/i);
-    const priceText = priceMatch?.[1] || '';
-    const price = parsePrice(priceText) || 0;
+    // Extract price using robust pattern matching
+    const price = extractPrice(html);
+    // Skip properties without a valid price
+    if (!price || price <= 0) {
+      return null;
+    }
     const priceFreqMatch = html.match(/per\s*(month|week|day)|(pm|pw|pd)/i);
-    const priceFrequency = priceFreqMatch 
-      ? (priceFreqMatch[1] || (priceFreqMatch[2] === 'pm' ? 'monthly' : priceFreqMatch[2] === 'pw' ? 'weekly' : 'daily'))
-      : 'monthly';
+    let priceFrequency: 'monthly' | 'weekly' | 'daily' = 'monthly';
+    if (priceFreqMatch) {
+      if (priceFreqMatch[1]) {
+        // Matched "per month/week/day"
+        const freq = priceFreqMatch[1].toLowerCase();
+        priceFrequency = freq === 'month' ? 'monthly' : freq === 'week' ? 'weekly' : 'daily';
+      } else if (priceFreqMatch[2]) {
+        // Matched "pm/pw/pd"
+        const abbrev = priceFreqMatch[2].toLowerCase();
+        priceFrequency = abbrev === 'pm' ? 'monthly' : abbrev === 'pw' ? 'weekly' : 'daily';
+      }
+    }
 
     // Extract location
     const locationMatch = html.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
@@ -532,6 +753,12 @@ Deno.serve(async (req) => {
       
       for (const property of batch) {
         try {
+          // Skip properties without a valid price
+          if (!property.price || property.price <= 0) {
+            console.log(`Skipping property ${property.external_id} - no valid price (price: ${property.price})`);
+            continue;
+          }
+          
           // Calculate scam score
           const scamAnalysis = calculateScamScore(property);
           

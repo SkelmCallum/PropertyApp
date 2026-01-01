@@ -16,13 +16,14 @@
     "supabase:gen:types": "supabase gen types typescript --project-id nythkipgytsalmaxngza > src/lib/types/database.types.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.47.0",
     "@supabase/ssr": "^0.5.0",
+    "@supabase/supabase-js": "^2.47.0",
+    "@vercel/analytics": "^1.6.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "lucide-react": "^0.468.0",
-    "clsx": "^2.1.1",
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {

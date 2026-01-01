@@ -80,6 +80,176 @@ export abstract class BaseScraper {
     return isNaN(price) ? null : price;
   }
 
+  // Extract price from JSON/JavaScript data
+  protected extractPriceFromJson(jsonData: any, path: string[] = []): number | null {
+    if (jsonData === null || jsonData === undefined) return null;
+    
+    // Check if current object has price-related fields
+    const priceFields = ['price', 'rent', 'rentalPrice', 'amount', 'cost', 'monthlyRent', 'weeklyRent', 'dailyRent'];
+    for (const field of priceFields) {
+      if (jsonData[field] !== undefined && jsonData[field] !== null) {
+        const value = jsonData[field];
+        if (typeof value === 'number' && value > 0) {
+          return value;
+        }
+        if (typeof value === 'string') {
+          const parsed = this.parsePrice(value);
+          if (parsed !== null && parsed > 0) {
+            return parsed;
+          }
+        }
+        if (typeof value === 'object' && value.value) {
+          const parsed = this.parsePrice(String(value.value));
+          if (parsed !== null && parsed > 0) {
+            return parsed;
+          }
+        }
+      }
+    }
+
+    // Recursively search in nested objects (limit depth to avoid infinite loops)
+    if (path.length < 5 && typeof jsonData === 'object' && !Array.isArray(jsonData)) {
+      for (const key in jsonData) {
+        if (jsonData.hasOwnProperty(key)) {
+          const result = this.extractPriceFromJson(jsonData[key], [...path, key]);
+          if (result !== null && result > 0) {
+            return result;
+          }
+        }
+      }
+    }
+
+    // Search in arrays
+    if (Array.isArray(jsonData) && path.length < 5) {
+      for (const item of jsonData) {
+        const result = this.extractPriceFromJson(item, path);
+        if (result !== null && result > 0) {
+          return result;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // Extract price from HTML using multiple patterns
+  protected extractPrice(html: string): number | null {
+    // First, try to extract from JavaScript/JSON data
+    const jsonPrice = this.extractPriceFromJavaScript(html);
+    if (jsonPrice !== null && jsonPrice > 0) {
+      return jsonPrice;
+    }
+
+    // Then try HTML patterns
+    const pricePatterns = [
+      // Pattern 1: Inside price-related HTML elements (class or id containing "price")
+      /<[^>]*(?:class|id)="[^"]*price[^"]*"[^>]*>.*?R\s*([\d\s,]+)/is,
+      // Pattern 2: R followed by digits with frequency indicator
+      /R\s*([\d\s,]+)\s*(?:per\s*(month|week|day)|pm|pw|pd|p\/m|p\/w|p\/d)/i,
+      // Pattern 3: Basic R followed by digits (most common)
+      /R\s*([\d\s,]+)/i,
+      // Pattern 4: Price label format (rent: R12,500)
+      /(?:rent|price)[^:]*:?\s*R?\s*([\d\s,]+)/i,
+      // Pattern 5: Currency symbol variations
+      /(?:R|ZAR|R\s*)\s*([\d\s,]+)/i,
+      // Pattern 6: Price in data attributes (data-price, data-rent, etc.)
+      /(?:data-price|data-rent|data-cost)="[^"]*R?\s*([\d\s,]+)"/i,
+      // Pattern 7: Price in meta tags
+      /<meta[^>]*(?:property|name)="[^"]*price[^"]*"[^>]*content="[^"]*R?\s*([\d\s,]+)"/i,
+      // Pattern 8: Price in JSON-LD structured data
+      /"price"[^:]*:\s*"?R?\s*([\d\s,]+)"?/i,
+      // Pattern 9: Price with thousands separator (R 12,500 or R12,500)
+      /R\s*([\d]{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?)/i,
+      // Pattern 10: Price in span/div with price class (more specific)
+      /<(?:span|div|p|h[1-6])[^>]*class="[^"]*price[^"]*"[^>]*>[\s\S]*?R\s*([\d\s,]+)/is,
+    ];
+
+    for (const pattern of pricePatterns) {
+      const match = html.match(pattern);
+      if (match && match[1]) {
+        const priceText = match[1].trim();
+        const price = this.parsePrice(priceText);
+        if (price !== null && price > 0) {
+          return price;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // Extract price from JavaScript/JSON embedded in HTML
+  protected extractPriceFromJavaScript(html: string): number | null {
+    // Try to extract JSON from script tags
+    const scriptPatterns = [
+      /<script[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/gi,
+      /<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi,
+      /<script[^>]*>[\s\S]*?window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?});[\s\S]*?<\/script>/gi,
+      /<script[^>]*>[\s\S]*?window\.__NEXT_DATA__\s*=\s*({[\s\S]*?});[\s\S]*?<\/script>/gi,
+      /<script[^>]*>[\s\S]*?__INITIAL_PROPS__\s*=\s*({[\s\S]*?});[\s\S]*?<\/script>/gi,
+    ];
+
+    for (const pattern of scriptPatterns) {
+      const matches = html.matchAll(pattern);
+      for (const match of matches) {
+        if (match[1]) {
+          try {
+            const jsonData = JSON.parse(match[1]);
+            const price = this.extractPriceFromJson(jsonData);
+            if (price !== null && price > 0) {
+              return price;
+            }
+          } catch (e) {
+            // Not valid JSON, continue
+          }
+        }
+      }
+    }
+
+    // Try to find JavaScript variables with price data
+    const jsVarPatterns = [
+      /(?:price|rent|rentalPrice|amount)\s*[:=]\s*["']?R?\s*([\d\s,]+)["']?/gi,
+      /(?:price|rent|rentalPrice|amount)\s*[:=]\s*(\d+(?:\.\d+)?)/gi,
+      /"price"\s*:\s*["']?R?\s*([\d\s,]+)["']?/gi,
+      /"rent"\s*:\s*["']?R?\s*([\d\s,]+)["']?/gi,
+      /"amount"\s*:\s*["']?R?\s*([\d\s,]+)["']?/gi,
+    ];
+
+    for (const pattern of jsVarPatterns) {
+      const matches = html.matchAll(pattern);
+      for (const match of matches) {
+        if (match[1]) {
+          const price = this.parsePrice(match[1]);
+          if (price !== null && price > 0) {
+            return price;
+          }
+        }
+      }
+    }
+
+    // Look for unescaped JSON in script tags (common in React apps)
+    const unescapedJsonPattern = /<script[^>]*>[\s\S]*?({[\s\S]{100,10000}?"price"[\s\S]*?})[\s\S]*?<\/script>/gi;
+    const unescapedMatches = html.matchAll(unescapedJsonPattern);
+    for (const match of unescapedMatches) {
+      if (match[1]) {
+        try {
+          // Try to extract just the price value from the JSON-like structure
+          const priceMatch = match[1].match(/"price"\s*:\s*["']?R?\s*([\d\s,]+)["']?/i);
+          if (priceMatch && priceMatch[1]) {
+            const price = this.parsePrice(priceMatch[1]);
+            if (price !== null && price > 0) {
+              return price;
+            }
+          }
+        } catch (e) {
+          // Continue searching
+        }
+      }
+    }
+
+    return null;
+  }
+
   // Parse number of rooms
   protected parseRooms(text: string): number {
     if (!text) return 0;
@@ -112,6 +282,29 @@ export abstract class BaseScraper {
   protected isFurnished(text: string): boolean {
     const lowerText = text.toLowerCase();
     return lowerText.includes('furnished') && !lowerText.includes('unfurnished');
+  }
+
+  // Normalize price frequency from various formats to standard values
+  protected normalizePriceFrequency(match: RegExpMatchArray | null): 'monthly' | 'weekly' | 'daily' {
+    if (!match) return 'monthly';
+    
+    if (match[1]) {
+      // Matched "per month/week/day"
+      const freq = match[1].toLowerCase();
+      if (freq === 'month') return 'monthly';
+      if (freq === 'week') return 'weekly';
+      if (freq === 'day') return 'daily';
+    }
+    
+    if (match[2]) {
+      // Matched abbreviation (pm/pw/pd or p/m/p/w/p/d)
+      const abbrev = match[2].toLowerCase();
+      if (abbrev === 'pm' || abbrev === 'p/m') return 'monthly';
+      if (abbrev === 'pw' || abbrev === 'p/w') return 'weekly';
+      if (abbrev === 'pd' || abbrev === 'p/d') return 'daily';
+    }
+    
+    return 'monthly';
   }
 
   // Generate a hash for deduplication

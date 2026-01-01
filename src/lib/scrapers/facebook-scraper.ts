@@ -411,7 +411,7 @@ export class FacebookScraper extends BaseScraper {
         postal_code: null,
         latitude,
         longitude,
-        price: price || 0,
+        price: price,
         price_frequency: 'monthly', // Facebook Marketplace typically uses monthly
         deposit: null,
         bedrooms,
@@ -441,15 +441,14 @@ export class FacebookScraper extends BaseScraper {
       const titleMatch = html.match(/<title>([^<]+)<\/title>|<h1[^>]*>([^<]+)<\/h1>/i);
       const title = this.cleanText(titleMatch?.[1] || titleMatch?.[2] || '');
 
-      // Extract price
-      const priceMatch = html.match(/R\s*([\d\s,]+)\s*(?:per\s*(month|week|day)|pm|pw|pd)/i) 
-        || html.match(/R\s*([\d\s,]+)/i);
-      const priceText = priceMatch?.[1] || '';
-      const price = this.parsePrice(priceText);
+      // Extract price using robust pattern matching
+      const price = this.extractPrice(html);
+      // Skip properties without a valid price
+      if (!price || price <= 0) {
+        return null;
+      }
       const priceFreqMatch = html.match(/per\s*(month|week|day)|(pm|pw|pd)/i);
-      const priceFrequency = priceFreqMatch 
-        ? (priceFreqMatch[1] || priceFreqMatch[2]?.replace('pm', 'monthly').replace('pw', 'weekly').replace('pd', 'daily') || 'monthly')
-        : 'monthly';
+      const priceFrequency = this.normalizePriceFrequency(priceFreqMatch);
 
       // Extract location (Facebook often shows location in various formats)
       const locationMatch = html.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
@@ -517,7 +516,7 @@ export class FacebookScraper extends BaseScraper {
         postal_code: null,
         latitude: null,
         longitude: null,
-        price: price || 0,
+        price: price,
         price_frequency: priceFrequency as 'monthly' | 'weekly' | 'daily',
         deposit: null,
         bedrooms,

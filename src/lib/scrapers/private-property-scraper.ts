@@ -30,12 +30,84 @@ export class PrivatePropertyScraper extends BaseScraper {
       // Note: In production, this would use Puppeteer/Playwright
       // For Supabase Edge Functions, we use fetch with careful parsing
       
+      // Try different URL patterns for page 1
+      const urlPatterns = [
+        `${this.config.searchUrl}/${city}`, // /to-rent/cape-town
+        `${this.config.searchUrl}/${city}/`, // /to-rent/cape-town/
+        `${this.config.baseUrl}/to-rent/${city}`, // Full URL
+        `${this.config.baseUrl}/to-rent/western-cape/${city}`, // With province
+        `${this.config.searchUrl}?location=${city}`, // Query param
+        `${this.config.searchUrl}`, // Just base search URL
+      ];
+      
+      let workingUrl: string | null = null;
+      
+      // Test URL patterns for page 1
+      console.log(`[PrivateProperty] Testing URL patterns for city: ${city}`);
+      for (const testUrl of urlPatterns) {
+        try {
+          console.log(`[PrivateProperty] Trying URL: ${testUrl}`);
+          const testResponse = await fetch(testUrl, {
+            headers: {
+              'User-Agent': this.getNextUserAgent(),
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+          });
+          
+          if (testResponse.ok) {
+            const html = await testResponse.text();
+            // Check if the page has property listings (basic check)
+            if (html.length > 10000 && (html.includes('property') || html.includes('listing') || html.includes('rent'))) {
+              workingUrl = testUrl;
+              console.log(`[PrivateProperty] Found working URL: ${testUrl}`);
+              break;
+            }
+          }
+        } catch (error) {
+          // Continue to next pattern
+          continue;
+        }
+      }
+      
+      if (!workingUrl) {
+        const errorMsg = `Could not find valid URL pattern for city: ${city}. Tried ${urlPatterns.length} patterns.`;
+        console.error(`[PrivateProperty] ${errorMsg}`);
+        errors.push(errorMsg);
+        return {
+          success: false,
+          properties: [],
+          errors,
+          pagesScraped: 0,
+          duration: Date.now() - startTime,
+        };
+      }
+      
+      // Use working URL or construct paginated URLs
       for (let page = 1; page <= this.config.maxPages; page++) {
         try {
-          const url = `${this.config.searchUrl}/${city}?page=${page}`;
+          let url: string;
+          if (page === 1 && workingUrl) {
+            url = workingUrl;
+          } else if (page === 1) {
+            url = `${this.config.searchUrl}/${city}`;
+          } else {
+            // Properly construct pagination URL
+            const baseUrl = workingUrl || `${this.config.searchUrl}/${city}`;
+            // Check if baseUrl already has query parameters
+            if (baseUrl.includes('?')) {
+              url = `${baseUrl}&page=${page}`;
+            } else {
+              url = `${baseUrl}?page=${page}`;
+            }
+          }
+          
+          console.log(`[PrivateProperty] Scraping page ${page} of ${this.config.maxPages} for city: ${city}`);
           const pageProperties = await this.scrapeListingPage(url);
           
+          console.log(`[PrivateProperty] Page ${page}: Found ${pageProperties.length} properties`);
+          
           if (pageProperties.length === 0) {
+            console.log(`[PrivateProperty] No properties found on page ${page}, stopping pagination`);
             break; // No more results
           }
           
@@ -45,7 +117,26 @@ export class PrivatePropertyScraper extends BaseScraper {
           // Rate limiting
           await this.delay(this.getRateLimitDelay());
         } catch (error) {
-          errors.push(`Page ${page}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          
+          // If it's a 404 and we're past page 1, stop trying
+          if (errorMsg.includes('404') && page > 1) {
+            console.log(`[PrivateProperty] Got 404 on page ${page}, stopping pagination`);
+            break;
+          }
+          
+          // If it's a 404 on page 1, the URL structure might be wrong
+          if (errorMsg.includes('404') && page === 1) {
+            console.error(`[PrivateProperty] Page 1 returned 404 - URL structure may be incorrect`);
+            errors.push(`Page 1: ${errorMsg}`);
+            break; // Don't continue if page 1 fails
+          }
+          
+          const fullErrorMsg = `Page ${page}: ${errorMsg}`;
+          console.error(`[PrivateProperty] ${fullErrorMsg}`);
+          errors.push(fullErrorMsg);
+          
+          // Don't break on other errors, but log them
         }
       }
 
@@ -68,6 +159,7 @@ export class PrivatePropertyScraper extends BaseScraper {
   }
 
   async scrapeListingPage(url: string): Promise<ScrapedProperty[]> {
+    console.log(`[PrivateProperty] Fetching: ${url}`);
     const response = await fetch(url, {
       headers: {
         'User-Agent': this.getNextUserAgent(),
@@ -78,10 +170,13 @@ export class PrivatePropertyScraper extends BaseScraper {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+      console.error(`[PrivateProperty] ${errorMsg} for ${url}`);
+      throw new Error(errorMsg);
     }
 
     const html = await response.text();
+    console.log(`[PrivateProperty] Received ${html.length} bytes of HTML from ${url}`);
     const properties: ScrapedProperty[] = [];
 
     // Try to find property listing containers
@@ -108,14 +203,17 @@ export class PrivatePropertyScraper extends BaseScraper {
 
     // If no structured listings found, try to find links to property detail pages
     if (listings.length === 0) {
+      console.log(`[PrivateProperty] No structured listings found, trying to find property links...`);
       const linkPattern = /<a[^>]*href="(\/to-rent\/[^"]+)"[^>]*>/gi;
       const linkMatches = html.matchAll(linkPattern);
       const seenUrls = new Set<string>();
+      let linkCount = 0;
       
       for (const match of linkMatches) {
         const href = match[1];
         if (href && !seenUrls.has(href) && href.includes('/to-rent/')) {
           seenUrls.add(href);
+          linkCount++;
           const propertyUrl = href.startsWith('http') ? href : `${this.config.baseUrl}${href}`;
           
           // Try to scrape detail page for this property
@@ -128,14 +226,17 @@ export class PrivatePropertyScraper extends BaseScraper {
             }
           } catch (error) {
             // Continue with next property if one fails
-            console.error(`Failed to scrape ${propertyUrl}:`, error);
+            console.error(`[PrivateProperty] Failed to scrape ${propertyUrl}:`, error);
           }
         }
       }
       
+      console.log(`[PrivateProperty] Found ${linkCount} property links, scraped ${properties.length} properties`);
       return properties;
     }
 
+    console.log(`[PrivateProperty] Found ${listings.length} structured listings, parsing...`);
+    
     // Parse each listing
     for (const listingHtml of listings) {
       try {
@@ -144,11 +245,12 @@ export class PrivatePropertyScraper extends BaseScraper {
           properties.push(property);
         }
       } catch (error) {
-        console.error('Error parsing listing:', error);
+        console.error('[PrivateProperty] Error parsing listing:', error);
         // Continue with next listing
       }
     }
 
+    console.log(`[PrivateProperty] Successfully parsed ${properties.length} properties from ${listings.length} listings`);
     return properties;
   }
 
@@ -170,15 +272,14 @@ export class PrivatePropertyScraper extends BaseScraper {
     const titleMatch = html.match(/<h[23][^>]*>([^<]+)<\/h[23]>|<a[^>]*>([^<]+)<\/a>/i);
     const title = this.cleanText(titleMatch?.[1] || titleMatch?.[2] || '');
 
-    // Extract price
-    const priceMatch = html.match(/R\s*([\d\s,]+)\s*(?:per\s*(month|week|day)|pm|pw|pd)/i) 
-      || html.match(/R\s*([\d\s,]+)/i);
-    const priceText = priceMatch?.[1] || '';
-    const price = this.parsePrice(priceText);
+    // Extract price using robust pattern matching
+    const price = this.extractPrice(html);
+    // Skip properties without a valid price
+    if (!price || price <= 0) {
+      return null;
+    }
     const priceFreqMatch = html.match(/per\s*(month|week|day)|(pm|pw|pd)/i);
-    const priceFrequency = priceFreqMatch 
-      ? (priceFreqMatch[1] || priceFreqMatch[2]?.replace('pm', 'monthly').replace('pw', 'weekly').replace('pd', 'daily') || 'monthly')
-      : 'monthly';
+    const priceFrequency = this.normalizePriceFrequency(priceFreqMatch);
 
     // Extract location (suburb, city)
     const locationMatch = html.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
@@ -234,7 +335,7 @@ export class PrivatePropertyScraper extends BaseScraper {
       postal_code: null,
       latitude: null,
       longitude: null,
-      price: price || 0,
+      price: price,
       price_frequency: priceFrequency as 'monthly' | 'weekly' | 'daily',
       deposit: null,
       bedrooms,
@@ -275,15 +376,14 @@ export class PrivatePropertyScraper extends BaseScraper {
     const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>|<title>([^<]+)<\/title>/i);
     const title = this.cleanText(titleMatch?.[1] || titleMatch?.[2] || '');
 
-    // Extract price (more detailed on detail page)
-    const priceMatch = html.match(/R\s*([\d\s,]+)\s*(?:per\s*(month|week|day)|pm|pw|pd)/i) 
-      || html.match(/R\s*([\d\s,]+)/i);
-    const priceText = priceMatch?.[1] || '';
-    const price = this.parsePrice(priceText);
+    // Extract price using robust pattern matching (more detailed on detail page)
+    const price = this.extractPrice(html);
+    // Skip properties without a valid price
+    if (!price || price <= 0) {
+      return null;
+    }
     const priceFreqMatch = html.match(/per\s*(month|week|day)|(pm|pw|pd)/i);
-    const priceFrequency = priceFreqMatch 
-      ? (priceFreqMatch[1] || priceFreqMatch[2]?.replace('pm', 'monthly').replace('pw', 'weekly').replace('pd', 'daily') || 'monthly')
-      : 'monthly';
+    const priceFrequency = this.normalizePriceFrequency(priceFreqMatch);
 
     // Extract deposit
     const depositMatch = html.match(/deposit[^:]*:?\s*R\s*([\d\s,]+)/i);
@@ -402,7 +502,7 @@ export class PrivatePropertyScraper extends BaseScraper {
       postal_code: postalCode,
       latitude,
       longitude,
-      price: price || 0,
+      price: price,
       price_frequency: priceFrequency as 'monthly' | 'weekly' | 'daily',
       deposit,
       bedrooms,
