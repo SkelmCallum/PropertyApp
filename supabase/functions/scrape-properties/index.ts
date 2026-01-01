@@ -63,37 +63,45 @@ function parsePrice(priceText: string): number | null {
 }
 
 // Helper function to extract price from JSON/JavaScript data
-function extractPriceFromJson(jsonData: any, path: string[] = []): number | null {
+function extractPriceFromJson(jsonData: unknown, path: string[] = []): number | null {
   if (jsonData === null || jsonData === undefined) return null;
+  
+  // Type guard for objects
+  if (typeof jsonData !== 'object') return null;
   
   // Check if current object has price-related fields
   const priceFields = ['price', 'rent', 'rentalPrice', 'amount', 'cost', 'monthlyRent', 'weeklyRent', 'dailyRent'];
-  for (const field of priceFields) {
-    if (jsonData[field] !== undefined && jsonData[field] !== null) {
-      const value = jsonData[field];
-      if (typeof value === 'number' && value > 0) {
-        return value;
-      }
-      if (typeof value === 'string') {
-        const parsed = parsePrice(value);
-        if (parsed !== null && parsed > 0) {
-          return parsed;
+  if (jsonData && typeof jsonData === 'object' && !Array.isArray(jsonData)) {
+    const obj = jsonData as Record<string, unknown>;
+    for (const field of priceFields) {
+      if (obj[field] !== undefined && obj[field] !== null) {
+        const value = obj[field];
+        if (typeof value === 'number' && value > 0) {
+          return value;
         }
-      }
-      if (typeof value === 'object' && value.value) {
-        const parsed = parsePrice(String(value.value));
-        if (parsed !== null && parsed > 0) {
-          return parsed;
+        if (typeof value === 'string') {
+          const parsed = parsePrice(value);
+          if (parsed !== null && parsed > 0) {
+            return parsed;
+          }
+        }
+        if (typeof value === 'object' && value !== null && 'value' in value) {
+          const valueObj = value as { value: unknown };
+          const parsed = parsePrice(String(valueObj.value));
+          if (parsed !== null && parsed > 0) {
+            return parsed;
+          }
         }
       }
     }
   }
 
   // Recursively search in nested objects (limit depth to avoid infinite loops)
-  if (path.length < 5 && typeof jsonData === 'object' && !Array.isArray(jsonData)) {
-    for (const key in jsonData) {
-      if (jsonData.hasOwnProperty(key)) {
-        const result = extractPriceFromJson(jsonData[key], [...path, key]);
+  if (path.length < 5 && typeof jsonData === 'object' && !Array.isArray(jsonData) && jsonData !== null) {
+    const obj = jsonData as Record<string, unknown>;
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const result = extractPriceFromJson(obj[key], [...path, key]);
         if (result !== null && result > 0) {
           return result;
         }
@@ -135,7 +143,7 @@ function extractPriceFromJavaScript(html: string): number | null {
           if (price !== null && price > 0) {
             return price;
           }
-        } catch (e) {
+        } catch {
           // Not valid JSON, continue
         }
       }
@@ -201,9 +209,9 @@ function extractPriceFromJavaScript(html: string): number | null {
             }
           }
         }
-      } catch (e) {
-        // Continue searching
-      }
+        } catch {
+          // Continue searching
+        }
     }
   }
 
@@ -345,8 +353,6 @@ function isFurnished(text: string): boolean {
 
 // Scrape a specific source
 async function scrapeSource(source: PropertySource, city: string): Promise<ScrapedProperty[]> {
-  const properties: ScrapedProperty[] = [];
-  
   switch (source) {
     case 'private_property':
       return await scrapePrivateProperty(city);
@@ -364,48 +370,91 @@ async function scrapePrivateProperty(city: string): Promise<ScrapedProperty[]> {
   const properties: ScrapedProperty[] = [];
   const baseUrl = 'https://www.privateproperty.co.za';
   const searchUrl = `${baseUrl}/to-rent/${city}`;
-  const maxPages = 3; // Limit pages for Edge Function timeout
+  const maxPages = 2; // Limit pages for Edge Function timeout
 
   try {
+    console.log(`[PrivateProperty] Starting scrape for city: ${city}`);
+    
     for (let page = 1; page <= maxPages; page++) {
       const url = `${searchUrl}?page=${page}`;
+      console.log(`[PrivateProperty] Fetching page ${page}: ${url}`);
+      
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': baseUrl,
         },
       });
 
-      if (!response.ok) break;
+      if (!response.ok) {
+        console.log(`[PrivateProperty] Page ${page} returned ${response.status}, stopping`);
+        break;
+      }
 
       const html = await response.text();
-      const linkPattern = /<a[^>]*href="(\/to-rent\/[^"]+)"[^>]*>/gi;
-      const linkMatches = html.matchAll(linkPattern);
+      console.log(`[PrivateProperty] Page ${page} HTML length: ${html.length} chars`);
+      
+      // Try multiple link patterns
+      const linkPatterns = [
+        /<a[^>]*href="(\/to-rent\/[^"]+)"[^>]*>/gi,
+        /<a[^>]*href="(https?:\/\/[^"]*privateproperty[^"]*\/to-rent\/[^"]+)"[^>]*>/gi,
+        /href="(\/to-rent\/[^\/]+\/[^"]+)"[^>]*>/gi,
+      ];
+      
       const seenUrls = new Set<string>();
       
-      for (const match of linkMatches) {
-        const href = match[1];
-        if (href && !seenUrls.has(href) && href.includes('/to-rent/')) {
-          seenUrls.add(href);
-          const propertyUrl = `${baseUrl}${href}`;
-          
-          try {
-            const property = await scrapePropertyDetail(propertyUrl, 'private_property', baseUrl);
-            if (property) {
-              properties.push(property);
-            }
-            // Rate limiting
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } catch (error) {
-            console.error(`Failed to scrape ${propertyUrl}:`, error);
+      for (const linkPattern of linkPatterns) {
+        const linkMatches = html.matchAll(linkPattern);
+        for (const match of linkMatches) {
+          const href = match[1];
+          if (href && !seenUrls.has(href) && href.includes('/to-rent/') && !href.includes('/p') && !href.includes('#')) {
+            seenUrls.add(href);
           }
+        }
+        if (seenUrls.size > 0) break; // Use first pattern that finds links
+      }
+      
+      console.log(`[PrivateProperty] Page ${page} found ${seenUrls.size} unique property links`);
+      
+      // Limit to first 5 properties per page to avoid timeout
+      const linksToScrape = Array.from(seenUrls).slice(0, 5);
+      console.log(`[PrivateProperty] Scraping ${linksToScrape.length} properties from page ${page}`);
+      
+      for (const href of linksToScrape) {
+        const propertyUrl = href.startsWith('http') ? href : `${baseUrl}${href}`;
+        console.log(`[PrivateProperty] Scraping: ${propertyUrl}`);
+        
+        try {
+          const property = await scrapePropertyDetail(propertyUrl, 'private_property', baseUrl);
+          if (property) {
+            properties.push(property);
+            console.log(`[PrivateProperty] Successfully scraped: ${property.title}`);
+          } else {
+            console.log(`[PrivateProperty] No property data extracted from: ${propertyUrl}`);
+          }
+          // Rate limiting
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          console.error(`[PrivateProperty] Failed to scrape ${propertyUrl}:`, error);
         }
       }
 
-      if (seenUrls.size === 0) break; // No more results
+      if (seenUrls.size === 0) {
+        console.log(`[PrivateProperty] No links found on page ${page}, stopping`);
+        break;
+      }
+      
+      if (properties.length >= 10) {
+        console.log(`[PrivateProperty] Reached property limit (10), stopping`);
+        break;
+      }
     }
+    
+    console.log(`[PrivateProperty] Scraping complete: ${properties.length} properties found`);
   } catch (error) {
-    console.error('Error scraping Private Property:', error);
+    console.error('[PrivateProperty] Error scraping:', error);
   }
 
   return properties;
@@ -416,54 +465,97 @@ async function scrapeProperty24(city: string): Promise<ScrapedProperty[]> {
   const properties: ScrapedProperty[] = [];
   const baseUrl = 'https://www.property24.com';
   const searchUrl = `${baseUrl}/to-rent/${city}`;
-  const maxPages = 3;
+  const maxPages = 2;
 
   try {
+    console.log(`[Property24] Starting scrape for city: ${city}`);
+    
     for (let page = 1; page <= maxPages; page++) {
       const url = `${searchUrl}?page=${page}`;
+      console.log(`[Property24] Fetching page ${page}: ${url}`);
+      
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': baseUrl,
         },
       });
 
-      if (!response.ok) break;
+      if (!response.ok) {
+        console.log(`[Property24] Page ${page} returned ${response.status}, stopping`);
+        break;
+      }
 
       const html = await response.text();
-      const linkPattern = /<a[^>]*href="(\/to-rent\/[^"]+)"[^>]*>/gi;
-      const linkMatches = html.matchAll(linkPattern);
+      console.log(`[Property24] Page ${page} HTML length: ${html.length} chars`);
+      
+      // Try multiple link patterns
+      const linkPatterns = [
+        /<a[^>]*href="(\/to-rent\/[^"]+)"[^>]*>/gi,
+        /<a[^>]*href="(https?:\/\/[^"]*property24[^"]*\/to-rent\/[^"]+)"[^>]*>/gi,
+        /href="(\/to-rent\/[^\/]+\/[^"]+)"[^>]*>/gi,
+      ];
+      
       const seenUrls = new Set<string>();
       
-      for (const match of linkMatches) {
-        const href = match[1];
-        if (href && !seenUrls.has(href) && href.includes('/to-rent/')) {
-          seenUrls.add(href);
-          const propertyUrl = `${baseUrl}${href}`;
-          
-          try {
-            const property = await scrapePropertyDetail(propertyUrl, 'property24', baseUrl);
-            if (property) {
-              properties.push(property);
-            }
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } catch (error) {
-            console.error(`Failed to scrape ${propertyUrl}:`, error);
+      for (const linkPattern of linkPatterns) {
+        const linkMatches = html.matchAll(linkPattern);
+        for (const match of linkMatches) {
+          const href = match[1];
+          if (href && !seenUrls.has(href) && href.includes('/to-rent/') && !href.includes('/p') && !href.includes('#')) {
+            seenUrls.add(href);
           }
+        }
+        if (seenUrls.size > 0) break; // Use first pattern that finds links
+      }
+      
+      console.log(`[Property24] Page ${page} found ${seenUrls.size} unique property links`);
+      
+      // Limit to first 5 properties per page to avoid timeout
+      const linksToScrape = Array.from(seenUrls).slice(0, 5);
+      console.log(`[Property24] Scraping ${linksToScrape.length} properties from page ${page}`);
+      
+      for (const href of linksToScrape) {
+        const propertyUrl = href.startsWith('http') ? href : `${baseUrl}${href}`;
+        console.log(`[Property24] Scraping: ${propertyUrl}`);
+        
+        try {
+          const property = await scrapePropertyDetail(propertyUrl, 'property24', baseUrl);
+          if (property) {
+            properties.push(property);
+            console.log(`[Property24] Successfully scraped: ${property.title}`);
+          } else {
+            console.log(`[Property24] No property data extracted from: ${propertyUrl}`);
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          console.error(`[Property24] Failed to scrape ${propertyUrl}:`, error);
         }
       }
 
-      if (seenUrls.size === 0) break;
+      if (seenUrls.size === 0) {
+        console.log(`[Property24] No links found on page ${page}, stopping`);
+        break;
+      }
+      
+      if (properties.length >= 10) {
+        console.log(`[Property24] Reached property limit (10), stopping`);
+        break;
+      }
     }
+    
+    console.log(`[Property24] Scraping complete: ${properties.length} properties found`);
   } catch (error) {
-    console.error('Error scraping Property24:', error);
+    console.error('[Property24] Error scraping:', error);
   }
 
   return properties;
 }
 
 // Scrape Facebook Marketplace (simplified - may need different approach)
-async function scrapeFacebook(city: string): Promise<ScrapedProperty[]> {
+async function scrapeFacebook(_city: string): Promise<ScrapedProperty[]> {
   // Facebook Marketplace requires more complex scraping
   // For now, return empty array - can be implemented later
   return [];
@@ -472,16 +564,23 @@ async function scrapeFacebook(city: string): Promise<ScrapedProperty[]> {
 // Scrape a property detail page
 async function scrapePropertyDetail(url: string, source: PropertySource, baseUrl: string): Promise<ScrapedProperty | null> {
   try {
+    console.log(`[${source}] Scraping detail page: ${url}`);
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': baseUrl,
       },
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.log(`[${source}] Failed to fetch ${url}: HTTP ${response.status}`);
+      return null;
+    }
 
     const html = await response.text();
+    console.log(`[${source}] Fetched ${url}, HTML length: ${html.length} chars`);
 
     // Extract external ID from URL
     const idMatch = url.match(/\/(\d+)(?:\/|$)/);
@@ -493,8 +592,10 @@ async function scrapePropertyDetail(url: string, source: PropertySource, baseUrl
 
     // Extract price using robust pattern matching
     const price = extractPrice(html);
+    console.log(`[${source}] Extracted price from ${url}: ${price}`);
     // Skip properties without a valid price
     if (!price || price <= 0) {
+      console.log(`[${source}] Skipping ${url} - no valid price found`);
       return null;
     }
     const priceFreqMatch = html.match(/per\s*(month|week|day)|(pm|pw|pd)/i);
@@ -765,15 +866,19 @@ Deno.serve(async (req) => {
     // Scrape each source
     for (const sourceToScrape of sourcesToScrape) {
       try {
+        console.log(`[Main] Starting scrape for source: ${sourceToScrape}, city: ${city}`);
         const scraped = await scrapeSource(sourceToScrape, city);
+        console.log(`[Main] Source ${sourceToScrape} returned ${scraped.length} properties`);
         properties.push(...scraped);
         propertiesFound += scraped.length;
       } catch (error) {
         const errorMsg = `Failed to scrape ${sourceToScrape}: ${error instanceof Error ? error.message : 'Unknown error'}`;
         errors.push(errorMsg);
-        console.error(errorMsg, error);
+        console.error(`[Main] ${errorMsg}`, error);
       }
     }
+    
+    console.log(`[Main] Total properties found from all sources: ${propertiesFound}`);
 
     // Deduplicate properties
     const deduplicated = deduplicateProperties(properties);

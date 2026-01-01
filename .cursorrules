@@ -1,0 +1,306 @@
+# Cursor Rules for PropertyApp
+
+## MCP (Model Context Protocol) Tools Available
+
+This project has MCP servers configured for Supabase, Vercel, and GitHub. AI agents can use these tools to interact with these services via CLI commands.
+
+### Available MCP Servers
+
+#### 1. Supabase MCP Server
+- **Purpose**: Access Supabase database, schema, and project information
+- **Capabilities**: 
+  - Read database schema and table structures
+  - Query database (read-only mode)
+  - View project configuration
+  - Access Supabase project information
+- **When to use**: 
+  - When you need to check database schema or table structures
+  - When you need to verify database migrations
+  - When you need to understand the data model
+  - When checking Supabase project settings or configuration
+- **Note**: The Supabase MCP server is configured in read-only mode for safety
+
+#### 2. Vercel MCP Server
+- **Purpose**: Access Vercel projects, deployments, and configurations
+- **Capabilities**:
+  - View projects and deployments
+  - Check deployment status and logs
+  - Access project configurations
+  - View deployment metrics and history
+- **When to use**:
+  - When checking deployment status
+  - When viewing deployment logs or errors
+  - When accessing project configurations
+  - When troubleshooting deployment issues
+  - When checking environment variables or project settings
+
+#### 3. GitHub MCP Server
+- **Purpose**: Access GitHub repositories, workflows, and code
+- **Capabilities**:
+  - View repositories and branches
+  - Read issues and pull requests
+  - Access commit history
+  - View workflow runs and status
+  - Read file contents
+  - Search repositories and code
+- **When to use**:
+  - When checking GitHub Actions workflow status
+  - When viewing repository structure or files
+  - When checking issues or pull requests
+  - When accessing commit history
+  - When verifying workflow configurations
+
+### How to Use MCP Tools
+
+1. **For Supabase operations**: Use the Supabase MCP server to query schema, check table structures, or view project information. For write operations or migrations, use the Supabase CLI directly.
+
+2. **For Vercel operations**: Use the Vercel MCP server to check deployments, view logs, or access project configurations. For deployment operations, you can also use the Vercel CLI.
+
+3. **For GitHub operations**: Use the GitHub MCP server to check workflow runs, view repository information, or read files. For git operations (commit, push, etc.), use git CLI commands directly.
+
+### Important Notes
+
+- MCP tools are available automatically when the servers are properly configured
+- See `MCP_SETUP.md` and `CURSOR_MCP_SETUP.md` for setup instructions
+- MCP servers require proper authentication tokens (configured in Cursor settings)
+- The Supabase MCP server is read-only - use Supabase CLI for write operations
+- Always prefer MCP tools when available, as they provide structured access to these services
+
+### CLI Commands Available
+
+In addition to MCP tools, you can also use direct CLI commands:
+
+- **Supabase CLI**: `supabase` commands (e.g., `supabase db push`, `supabase functions deploy`)
+- **Vercel CLI**: `vercel` commands (e.g., `vercel deploy`, `vercel logs`)
+- **Git/GitHub CLI**: `git` and `gh` commands for version control operations
+
+### Project Context
+
+This is a Next.js property rental aggregator application that uses:
+- Supabase for database and authentication
+- Vercel for web deployment
+- GitHub Actions for automated scraping workflows
+
+When working with these services, prefer using MCP tools when available for read operations, and CLI commands for write operations.
+
+## Auto-Commit Workflow
+
+**IMPORTANT**: After making any code changes, agents MUST automatically commit changes to GitHub if the project builds successfully.
+
+### Auto-Commit Process
+
+1. **After Making Changes**: Once code changes are complete, run the auto-commit script
+2. **Build Validation**: The script automatically runs linting and build checks
+3. **Automatic Commit**: If build succeeds, changes are automatically committed
+4. **Push to GitHub**: Optionally push to GitHub (use `--push` flag)
+
+### Using Auto-Commit Scripts
+
+#### PowerShell (Windows - Recommended)
+```powershell
+.\scripts\auto-commit.ps1 -Message "Description of changes" -Push
+```
+
+#### Bash (Linux/Mac/Git Bash)
+```bash
+./scripts/auto-commit.sh "Description of changes" --push
+```
+
+### Auto-Commit Rules
+
+- **Always commit after successful changes**: After completing any code modifications, run the auto-commit script
+- **Descriptive commit messages**: Use clear, descriptive commit messages following conventional commits format:
+  - `feat: add new feature`
+  - `fix: fix bug`
+  - `refactor: refactor code`
+  - `docs: update documentation`
+  - `style: formatting changes`
+  - `test: add tests`
+  - `chore: maintenance tasks`
+- **Build must pass**: Never commit if the build fails. Fix errors first.
+- **Linting must pass**: Never commit if linting fails. Fix linting errors first.
+- **Push when appropriate**: Use `--push` flag to automatically push to GitHub after commit
+
+### Pre-Commit Hook
+
+A pre-commit hook is configured to automatically validate builds before any commit:
+- Runs ESLint to check code quality
+- Runs `npm run build` to ensure project builds successfully
+- Prevents commits if validation fails
+
+### Manual Override
+
+If you need to skip build validation (not recommended):
+- PowerShell: `.\scripts\auto-commit.ps1 -Message "message" -SkipBuild`
+- Bash: `./scripts/auto-commit.sh "message" --skip-build`
+
+### Workflow Example
+
+```powershell
+# 1. Make code changes
+# 2. Verify changes are correct
+# 3. Auto-commit with build validation
+.\scripts\auto-commit.ps1 -Message "feat: add user authentication" -Push
+
+# The script will:
+# - Run ESLint
+# - Run build
+# - Stage all changes
+# - Commit with message
+# - Push to GitHub (if -Push flag used)
+```
+
+### Important Notes
+
+- **Never commit broken code**: Always ensure the project builds before committing
+- **Test locally first**: Verify changes work as expected before auto-committing
+- **Use meaningful messages**: Commit messages should clearly describe what changed
+- **Follow conventional commits**: Use standard commit message prefixes
+- **Push responsibly**: Only push when changes are ready and tested
+
+## Professional Development Standards
+
+All code must follow professional, modern development standards and best practices. Agents should act as senior developers with expertise in the tech stack.
+
+### Code Quality Standards
+
+- **TypeScript**: Use strict TypeScript with proper typing. Avoid `any` types - use `unknown` or proper types instead
+- **Type Safety**: Always define types for all function parameters, return values, and variables
+- **Error Handling**: Implement comprehensive error handling with try-catch blocks and proper error messages
+- **Code Organization**: Follow clean code principles - single responsibility, DRY (Don't Repeat Yourself), and clear naming
+- **Comments**: Write clear, concise comments for complex logic. Code should be self-documenting when possible
+- **Consistency**: Follow existing code patterns and conventions in the codebase
+
+### Next.js Best Practices
+
+- **App Router**: Use Next.js 14+ App Router conventions (this project uses App Router)
+- **Server Components**: Prefer Server Components by default. Use Client Components (`'use client'`) only when necessary (interactivity, hooks, browser APIs)
+- **Data Fetching**: Use async Server Components for data fetching. Use `fetch` with proper caching strategies
+- **API Routes**: Keep API routes focused and RESTful. Use proper HTTP status codes
+- **Middleware**: Use middleware for authentication and request handling when appropriate
+- **Performance**: Implement proper caching, use `next/image` for images, and optimize bundle size
+- **SEO**: Use proper metadata, semantic HTML, and structured data
+
+### React Best Practices
+
+- **Component Structure**: Create reusable, composable components. Keep components small and focused
+- **Hooks**: Use React hooks appropriately. Follow the Rules of Hooks
+- **State Management**: Use local state when possible. Consider context or state management libraries for complex state
+- **Props**: Use TypeScript interfaces for props. Destructure props cleanly
+- **Performance**: Use `React.memo`, `useMemo`, and `useCallback` when appropriate to prevent unnecessary re-renders
+- **Accessibility**: Follow WCAG guidelines. Use semantic HTML, ARIA attributes, and keyboard navigation
+
+### TypeScript Standards
+
+- **Strict Mode**: Always use strict TypeScript settings (already configured)
+- **Type Definitions**: Create and use proper type definitions. Place shared types in `src/lib/types/`
+- **Interfaces vs Types**: Use `interface` for object shapes, `type` for unions, intersections, and computed types
+- **Generics**: Use generics for reusable, type-safe code
+- **Utility Types**: Leverage TypeScript utility types (`Partial`, `Pick`, `Omit`, etc.) when appropriate
+
+### Database & Supabase Standards
+
+- **Migrations**: Always use migrations for schema changes. Never modify database directly
+- **Row Level Security**: Implement RLS policies for all tables. Never disable RLS without explicit reason
+- **Queries**: Use parameterized queries to prevent SQL injection. Use Supabase client methods
+- **Error Handling**: Handle database errors gracefully with proper error messages
+- **Types**: Generate and use TypeScript types from Supabase schema (`supabase gen types`)
+
+### API & Backend Standards
+
+- **RESTful Design**: Follow REST conventions for API routes
+- **Validation**: Validate all input data. Use proper validation libraries or Zod schemas
+- **Error Responses**: Return consistent error response formats with appropriate HTTP status codes
+- **Security**: Never expose sensitive data. Validate authentication and authorization
+- **Rate Limiting**: Consider rate limiting for public APIs
+- **Logging**: Implement proper logging for debugging and monitoring
+
+### Performance & Efficiency
+
+- **Code Splitting**: Use dynamic imports for code splitting when appropriate
+- **Lazy Loading**: Implement lazy loading for images, components, and data
+- **Caching**: Use appropriate caching strategies (Next.js cache, React cache, etc.)
+- **Bundle Size**: Keep bundle sizes small. Remove unused dependencies
+- **Database Queries**: Optimize database queries. Use indexes, avoid N+1 queries
+- **Network Requests**: Minimize network requests. Batch requests when possible
+
+### Security Best Practices
+
+- **Environment Variables**: Never commit secrets. Use environment variables for sensitive data
+- **Authentication**: Always verify authentication and authorization before sensitive operations
+- **Input Validation**: Validate and sanitize all user inputs
+- **XSS Prevention**: Use React's built-in XSS protection. Avoid `dangerouslySetInnerHTML` unless necessary
+- **CSRF Protection**: Use Next.js built-in CSRF protection
+- **SQL Injection**: Always use parameterized queries (Supabase handles this)
+- **Dependencies**: Keep dependencies updated. Check for security vulnerabilities
+
+### Testing Standards
+
+- **Test Coverage**: Write tests for critical functionality (when test setup exists)
+- **Unit Tests**: Test individual functions and components
+- **Integration Tests**: Test API routes and data flows
+- **E2E Tests**: Consider E2E tests for critical user flows
+- **Test Quality**: Write clear, maintainable tests with descriptive names
+
+### Git & Version Control
+
+- **Commit Messages**: Write clear, descriptive commit messages following conventional commits
+- **Branching**: Use feature branches for new work
+- **Code Review**: Ensure code is reviewable - small, focused changes
+- **History**: Keep git history clean. Use interactive rebase when needed
+
+### Modern Development Practices
+
+- **ESLint**: Follow ESLint rules. Fix all linting errors before committing
+- **Prettier**: Maintain consistent code formatting (if configured)
+- **Async/Await**: Prefer async/await over promises. Handle errors properly
+- **Modern JavaScript**: Use modern ES6+ features (arrow functions, destructuring, template literals, etc.)
+- **Functional Programming**: Prefer functional programming patterns when appropriate
+- **Immutable Data**: Avoid mutating data directly. Use immutable patterns
+
+### Code Organization
+
+- **File Structure**: Follow the existing project structure. Place files in appropriate directories
+- **Naming Conventions**: Use clear, descriptive names. Follow existing naming patterns
+- **Exports**: Use named exports for better tree-shaking and clarity
+- **Barrel Exports**: Use index files for clean imports when appropriate
+- **Separation of Concerns**: Separate business logic, UI, and data access layers
+
+### Documentation
+
+- **README**: Keep README updated with setup and usage instructions
+- **Code Comments**: Document complex algorithms and business logic
+- **Type Documentation**: Use JSDoc comments for public APIs when helpful
+- **API Documentation**: Document API endpoints with request/response examples
+
+### Efficiency Guidelines
+
+- **DRY Principle**: Don't repeat yourself. Extract common code into reusable functions/components
+- **YAGNI**: You Aren't Gonna Need It - don't over-engineer. Build what's needed now
+- **KISS**: Keep It Simple, Stupid - prefer simple solutions over complex ones
+- **Performance First**: Consider performance implications of code changes
+- **Maintainability**: Write code that's easy to understand and maintain
+- **Refactoring**: Refactor code when it improves clarity or maintainability
+
+### When Writing Code
+
+1. **Think First**: Understand requirements before coding
+2. **Plan Structure**: Plan component/function structure before implementation
+3. **Write Clean Code**: Write readable, maintainable code
+4. **Test Thoroughly**: Test code manually and with automated tests
+5. **Review**: Review code for improvements before considering it complete
+6. **Document**: Add necessary documentation and comments
+
+### Code Review Checklist
+
+Before considering code complete, ensure:
+- ✅ TypeScript types are properly defined
+- ✅ Error handling is implemented
+- ✅ Code follows existing patterns
+- ✅ No linting errors
+- ✅ Performance considerations addressed
+- ✅ Security best practices followed
+- ✅ Code is readable and maintainable
+- ✅ Tests pass (if applicable)
+- ✅ Documentation updated if needed
+
