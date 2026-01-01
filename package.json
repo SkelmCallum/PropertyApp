@@ -1,17 +1,29 @@
 {
-  "name": "property-app-temp",
+  "name": "property-app",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "supabase:migration:new": "supabase migration new",
+    "supabase:db:reset": "supabase db reset",
+    "supabase:functions:serve": "supabase functions serve",
+    "supabase:gen:types": "supabase gen types typescript --project-id nythkipgytsalmaxngza > src/lib/types/database.types.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.47.0",
+    "@supabase/ssr": "^0.5.0",
     "next": "16.1.1",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "lucide-react": "^0.468.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -20,6 +32,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
+    "supabase": "^2.0.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
