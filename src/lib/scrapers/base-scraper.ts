@@ -143,7 +143,7 @@ export abstract class BaseScraper {
     // Then try HTML patterns
     const pricePatterns = [
       // Pattern 1: Inside price-related HTML elements (class or id containing "price")
-      /<[^>]*(?:class|id)="[^"]*price[^"]*"[^>]*>.*?R\s*([\d\s,]+)/is,
+      /<[^>]*(?:class|id)="[^"]*price[^"]*"[^>]*>[\s\S]*?R\s*([\d\s,]+)/i,
       // Pattern 2: R followed by digits with frequency indicator
       /R\s*([\d\s,]+)\s*(?:per\s*(month|week|day)|pm|pw|pd|p\/m|p\/w|p\/d)/i,
       // Pattern 3: Basic R followed by digits (most common)
@@ -161,7 +161,7 @@ export abstract class BaseScraper {
       // Pattern 9: Price with thousands separator (R 12,500 or R12,500)
       /R\s*([\d]{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?)/i,
       // Pattern 10: Price in span/div with price class (more specific)
-      /<(?:span|div|p|h[1-6])[^>]*class="[^"]*price[^"]*"[^>]*>[\s\S]*?R\s*([\d\s,]+)/is,
+      /<(?:span|div|p|h[1-6])[^>]*class="[^"]*price[^"]*"[^>]*>[\s\S]*?R\s*([\d\s,]+)/i,
     ];
 
     for (const pattern of pricePatterns) {
