@@ -357,6 +357,11 @@ export class FacebookScraper extends BaseScraper {
       const priceText = data.price || data.priceText || data.formattedPrice || '';
       const price = this.parsePrice(priceText);
       
+      // Skip properties without a valid price
+      if (!price || price <= 0) {
+        return null;
+      }
+      
       // Extract location
       const location = data.location || data.place || {};
       const address = location.address || location.full_address || '';
