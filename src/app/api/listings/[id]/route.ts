@@ -13,6 +13,7 @@ export async function GET(
       .from('properties')
       .select('*')
       .eq('id', id)
+      .gt('price', 0) // Exclude properties with price 0
       .single();
 
     if (error) {
