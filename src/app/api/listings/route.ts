@@ -6,14 +6,35 @@ import { ScraperOrchestrator } from '@/lib/scrapers/scraper-orchestrator';
 
 export async function GET(request: NextRequest) {
   try {
+    // Check environment variables before creating client
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      console.error('NEXT_PUBLIC_SUPABASE_URL is not set');
+      return NextResponse.json(
+        { error: 'Server configuration error: Supabase URL not set' },
+        { status: 500 }
+      );
+    }
+    
+    if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+      console.error('NEXT_PUBLIC_SUPABASE_ANON_KEY is not set');
+      return NextResponse.json(
+        { error: 'Server configuration error: Supabase anon key not set' },
+        { status: 500 }
+      );
+    }
+    
     const supabase = await createClient();
     const searchParams = request.nextUrl.searchParams;
 
     // Parse query parameters
+    // Support both 'suburb' (singular) and 'suburbs' (plural) for backward compatibility
+    const suburbParam = searchParams.get('suburbs') || searchParams.get('suburb');
+    const suburbs = suburbParam ? suburbParam.split(',').filter(Boolean) : undefined;
+    
     const filters: PropertySearchFilters = {
       query: searchParams.get('q') || undefined,
       city: searchParams.get('city') || undefined,
-      suburbs: searchParams.get('suburbs')?.split(',').filter(Boolean),
+      suburbs,
       property_types: searchParams.get('types')?.split(',').filter(Boolean) as PropertySearchFilters['property_types'],
       min_price: searchParams.get('min_price') ? parseInt(searchParams.get('min_price')!) : undefined,
       max_price: searchParams.get('max_price') ? parseInt(searchParams.get('max_price')!) : undefined,
@@ -33,7 +54,8 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from('properties')
       .select('*', { count: 'exact' })
-      .eq('status', 'active');
+      .eq('status', 'active')
+      .gt('price', 0); // Exclude properties with price 0
 
     // Apply filters
     if (filters.city) {
@@ -127,13 +149,18 @@ export async function GET(request: NextRequest) {
     const total = count || 0;
     const totalPages = Math.ceil(total / (filters.limit || 20));
 
-    // If no properties found, trigger scraping in the background
-    if (total === 0) {
-      // Trigger scraping asynchronously (don't wait for it)
-      triggerScraping(filters, supabase).catch(err => {
-        console.error('Background scraping error:', err);
-      });
-    }
+    // Scraping is now handled automatically by GitHub Actions (see .github/workflows/scrape-properties.yml)
+    // The scraping runs every 6 hours and updates the database automatically
+    // If you need to trigger scraping manually, you can:
+    // 1. Use GitHub Actions UI: Actions → Scrape Properties → Run workflow
+    // 2. Call the Supabase Edge Function directly via API
+    // 3. Uncomment the code below to re-enable on-demand scraping
+    //
+    // if (total === 0) {
+    //   triggerScraping(filters, supabase).catch(err => {
+    //     console.error('Background scraping error:', err);
+    //   });
+    // }
 
     // Log search results for debugging
     if (filters.query) {
@@ -165,15 +192,43 @@ async function triggerScraping(filters: PropertySearchFilters, supabaseClient: A
     // Create a service role client for database writes
     // The service role key bypasses RLS policies
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    
     if (!serviceRoleKey) {
       console.error('SUPABASE_SERVICE_ROLE_KEY is not set. Cannot save scraped properties.');
       return;
     }
-
+    
+    if (!supabaseUrl) {
+      console.error('NEXT_PUBLIC_SUPABASE_URL is not set. Cannot save scraped properties.');
+      return;
+    }
+    
+    // Log key info for debugging (without exposing the actual key)
+    console.log(`Creating Supabase service client with URL: ${supabaseUrl}`);
+    console.log(`Service role key present: ${serviceRoleKey ? 'Yes' : 'No'} (length: ${serviceRoleKey?.length || 0})`);
+    
+    // Trim any whitespace from the key
+    const trimmedKey = serviceRoleKey.trim();
+    
     const supabaseService = createSupabaseClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      serviceRoleKey
+      supabaseUrl,
+      trimmedKey
     );
+    
+    // Test the connection by making a simple query
+    const { data: testData, error: testError } = await supabaseService
+      .from('properties')
+      .select('id')
+      .limit(1);
+    
+    if (testError) {
+      console.error('Supabase connection test failed:', testError);
+      console.error('This means the API key or URL is invalid. Check your .env.local file.');
+      return;
+    }
+    
+    console.log('Supabase connection test successful');
 
     // Determine which sources to scrape
     const sourcesToScrape: PropertySource[] = filters.sources && filters.sources.length > 0
@@ -198,6 +253,18 @@ async function triggerScraping(filters: PropertySearchFilters, supabaseClient: A
     
     console.log(`Scraping completed: ${result.totalProperties} properties found`);
     
+    // Log detailed results from each scraper for debugging
+    result.results.forEach(({ source, result: scraperResult }) => {
+      console.log(`\n[${source}] Scraping Results:`);
+      console.log(`  - Success: ${scraperResult.success}`);
+      console.log(`  - Properties found: ${scraperResult.properties.length}`);
+      console.log(`  - Pages scraped: ${scraperResult.pagesScraped}`);
+      console.log(`  - Duration: ${scraperResult.duration}ms`);
+      if (scraperResult.errors.length > 0) {
+        console.log(`  - Errors: ${scraperResult.errors.join('; ')}`);
+      }
+    });
+    
     // Save scraped properties to database
     if (result.totalProperties > 0) {
       const allProperties = result.results.flatMap(r => r.result.properties);
@@ -212,7 +279,15 @@ async function triggerScraping(filters: PropertySearchFilters, supabaseClient: A
       for (let i = 0; i < deduplicated.length; i += batchSize) {
         const batch = deduplicated.slice(i, i + batchSize);
         
-        const propertiesToUpsert = batch.map(property => ({
+        // Filter out properties without valid prices
+        const validProperties = batch.filter(property => property.price && property.price > 0);
+        
+        if (validProperties.length === 0) {
+          console.log(`Skipping batch starting at index ${i} - no properties with valid prices`);
+          continue;
+        }
+        
+        const propertiesToUpsert = validProperties.map(property => ({
           external_id: property.external_id,
           source: property.source,
           source_url: property.source_url,
@@ -244,7 +319,7 @@ async function triggerScraping(filters: PropertySearchFilters, supabaseClient: A
           last_seen_at: new Date().toISOString(),
         }));
 
-        const { error: upsertError } = await supabaseService
+        const { data: upsertData, error: upsertError } = await supabaseService
           .from('properties')
           .upsert(propertiesToUpsert, {
             onConflict: 'source,external_id',
@@ -252,8 +327,21 @@ async function triggerScraping(filters: PropertySearchFilters, supabaseClient: A
 
         if (upsertError) {
           console.error(`Failed to upsert batch starting at index ${i}:`, upsertError);
+          console.error(`Error details:`, {
+            message: upsertError.message,
+            hint: upsertError.hint,
+            code: upsertError.code,
+            details: upsertError.details,
+          });
+          
+          // If it's an auth error, log more details
+          if (upsertError.message?.includes('Invalid API key') || upsertError.code === 'PGRST301') {
+            console.error('API Key Error - Check your SUPABASE_SERVICE_ROLE_KEY in .env.local');
+            console.error('Make sure the key starts with "eyJ" and is the service_role key, not the anon key');
+          }
         } else {
           savedCount += batch.length;
+          console.log(`Successfully saved batch ${Math.floor(i / batchSize) + 1} (${batch.length} properties)`);
         }
       }
       
