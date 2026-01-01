@@ -81,6 +81,24 @@ The project uses Supabase. Migrations are in `supabase/migrations/`.
 supabase functions deploy scrape-properties
 ```
 
+#### Automated Scraping with GitHub Actions
+
+The project uses GitHub Actions to automatically scrape properties on a schedule (every 6 hours).
+
+**Setup:**
+
+1. Go to your GitHub repository → Settings → Secrets and variables → Actions
+2. Add the following secrets:
+   - `SUPABASE_URL`: Your Supabase project URL (e.g., `https://xxxxx.supabase.co`)
+   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key (found in Supabase Dashboard → Settings → API)
+
+3. The workflow will automatically run every 6 hours, or you can trigger it manually:
+   - Go to Actions tab → "Scrape Properties" → Run workflow
+
+**Workflow file:** `.github/workflows/scrape-properties.yml`
+
+**Note:** For public repositories, GitHub Actions is free. For private repositories, you get 2,000 minutes/month free.
+
 ## Project Structure
 
 ```
