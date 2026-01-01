@@ -127,7 +127,7 @@ PropertyApp/
 
 ## MCP Configuration
 
-This project is configured to use Model Context Protocol (MCP) servers for Vercel and Supabase.
+This project is configured to use Model Context Protocol (MCP) servers for Vercel, Supabase, and GitHub.
 
 ### Quick Start
 

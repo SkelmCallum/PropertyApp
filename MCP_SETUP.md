@@ -1,6 +1,6 @@
-# MCP Setup Guide for Vercel and Supabase
+# MCP Setup Guide for Vercel, Supabase, and GitHub
 
-This guide will help you configure Model Context Protocol (MCP) servers for Vercel and Supabase in Cursor.
+This guide will help you configure Model Context Protocol (MCP) servers for Vercel, Supabase, and GitHub in Cursor.
 
 ## Quick Setup
 
@@ -25,6 +25,22 @@ This guide will help you configure Model Context Protocol (MCP) servers for Verc
   - `SUPABASE_ACCESS_TOKEN`: Your Supabase access token
   - `SUPABASE_PROJECT_REF`: Your Supabase project reference
 
+#### GitHub MCP Server (Official - Docker-based)
+- **Name**: `github`
+- **Command**: `docker`
+- **Args**: `run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server`
+- **Environment Variables**:
+  - `GITHUB_PERSONAL_ACCESS_TOKEN`: Your GitHub personal access token
+
+**Prerequisites:** Docker must be installed and running on your system.
+
+**Alternative (NPM-based, if Docker is not available):**
+- **Name**: `github`
+- **Command**: `npx`
+- **Args**: `-y @ama-mcp/github@latest`
+- **Environment Variables**:
+  - `GITHUB_PERSONAL_ACCESS_TOKEN`: Your GitHub personal access token
+
 ### Option 2: Using Configuration File
 
 If Cursor supports project-level MCP configuration, you can use the `mcp-config-template.json` file as a reference. Copy it to the appropriate location (typically `.cursor/mcp.json` or in Cursor's settings directory).
@@ -48,6 +64,19 @@ If Cursor supports project-level MCP configuration, you can use the `mcp-config-
 2. Find your "Reference ID" (it's in the URL or in the project settings)
 3. Use this as `SUPABASE_PROJECT_REF`
 
+### GitHub Personal Access Token
+1. Go to [GitHub Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens)
+2. Click **Generate new token** → **Generate new token (classic)**
+3. Give it a name (e.g., "MCP Server")
+4. Select the following scopes:
+   - `repo` - Full control of private repositories (if you need private repo access)
+   - `read:org` - Read org and team membership (if you need org access)
+   - `read:user` - Read user profile data
+   - `read:packages` - Download packages from GitHub Package Registry
+5. Click **Generate token**
+6. Copy the token immediately (you'll only see it once!)
+7. Set it as `GITHUB_PERSONAL_ACCESS_TOKEN`
+
 ## Environment Variables
 
 Set these environment variables in your system or in Cursor's environment:
@@ -56,6 +85,7 @@ Set these environment variables in your system or in Cursor's environment:
 VERCEL_ACCESS_TOKEN=your_vercel_token_here
 SUPABASE_ACCESS_TOKEN=your_supabase_token_here
 SUPABASE_PROJECT_REF=your_project_ref_here
+GITHUB_PERSONAL_ACCESS_TOKEN=your_github_token_here
 ```
 
 ## Verification
@@ -78,6 +108,14 @@ After setup:
 - Query database (read-only)
 - View table structures
 - Access project information
+
+### GitHub MCP
+- View repositories and branches
+- Read issues and pull requests
+- Access commit history
+- View workflow runs and status
+- Read file contents
+- Search repositories and code
 
 ## Troubleshooting
 
