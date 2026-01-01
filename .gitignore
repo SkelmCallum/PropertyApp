@@ -1,0 +1,26 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# MCP configuration with tokens (if using local config)
+.cursor/mcp.json
+mcp-config-local.json
+QUICK_SETUP.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.log
+
