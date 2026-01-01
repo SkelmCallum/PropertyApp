@@ -53,3 +53,7 @@ QUICK_SETUP.md
 # IDE files
 .vscode/
 .idea/
+
+# Test scripts (may contain sensitive info in execution)
+test-workflow.sh
+test-workflow.ps1

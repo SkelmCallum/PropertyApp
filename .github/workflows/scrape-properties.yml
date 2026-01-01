@@ -80,10 +80,45 @@ jobs:
             exit 0
           else
             echo "❌ Failed to trigger scraping job (HTTP $HTTP_CODE)"
-            echo "Please check:"
-            echo "  1. SUPABASE_URL secret is correct"
-            echo "  2. SUPABASE_SERVICE_ROLE_KEY secret is correct"
-            echo "  3. Edge function 'scrape-properties' is deployed"
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "TROUBLESHOOTING GUIDE"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            if [ "$HTTP_CODE" = "404" ]; then
+              echo "🔧 Issue: Edge function not found (404)"
+              echo ""
+              echo "Solution: Deploy the Edge Function"
+              echo "1. Get your Supabase access token: https://app.supabase.com/account/tokens"
+              echo "2. Run: npx supabase functions deploy scrape-properties --project-ref YOUR_PROJECT_REF"
+              echo "3. See DEPLOY_EDGE_FUNCTION.md for detailed instructions"
+            elif [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+              echo "🔧 Issue: Authentication failed ($HTTP_CODE)"
+              echo ""
+              echo "Solution: Check your GitHub secrets"
+              echo "1. Go to: https://github.com/SkelmCallum/PropertyApp/settings/secrets/actions"
+              echo "2. Verify SUPABASE_SERVICE_ROLE_KEY is the service_role key (starts with eyJ...)"
+              echo "3. Make sure it's not the anon key"
+              echo "4. Check for extra spaces or newlines"
+            elif [ -z "$HTTP_CODE" ]; then
+              echo "🔧 Issue: No response from server"
+              echo ""
+              echo "Solution: Check your SUPABASE_URL secret"
+              echo "1. Go to: https://github.com/SkelmCallum/PropertyApp/settings/secrets/actions"
+              echo "2. Verify SUPABASE_URL is correct (format: https://xxxxx.supabase.co)"
+              echo "3. Make sure there are no trailing slashes"
+            else
+              echo "🔧 Issue: Unexpected error (HTTP $HTTP_CODE)"
+              echo ""
+              echo "Check:"
+              echo "  1. SUPABASE_URL secret is correct"
+              echo "  2. SUPABASE_SERVICE_ROLE_KEY secret is correct"
+              echo "  3. Edge function 'scrape-properties' is deployed"
+              echo "  4. See validate-workflow-setup.md for full checklist"
+            fi
+            
+            echo ""
+            echo "For more help, see: .github/GITHUB_ACTIONS_SETUP.md"
             exit 1
           fi
 
