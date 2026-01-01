@@ -221,52 +221,84 @@ function extractPrice(html: string): number | null {
   // Then try HTML patterns - ordered from most specific to least specific
   // Priority: patterns that handle space-separated thousands (SA format) first
   const pricePatterns = [
-    // Pattern 1: R followed by digits with space-separated thousands (R16 000, R1 500 000)
-    // This handles South African price formatting with spaces as thousands separators
+    // Pattern 1: R followed by space, then digits with space-separated thousands (R 13 000, R 1 500 000)
+    // This handles "R 13 000" format with space after R
+    /R\s+(\d{1,3}(?:\s+\d{3})+(?:\s+\d{3})*)/i,
+    // Pattern 2: R followed by digits with space-separated thousands (R13 000, R1 500 000)
+    // This handles "R13 000" format without space after R
     /R\s*(\d{1,3}(?:\s+\d{3})+(?:\s+\d{3})*)/i,
-    // Pattern 2: R followed by digits with comma-separated thousands (R16,000, R1,500,000)
+    // Pattern 3: R followed by space, then digits with comma-separated thousands (R 13,000, R 1,500,000)
+    /R\s+(\d{1,3}(?:,\d{3})+(?:,\d{3})*)/i,
+    // Pattern 4: R followed by digits with comma-separated thousands (R13,000, R1,500,000)
     /R\s*(\d{1,3}(?:,\d{3})+(?:,\d{3})*)/i,
-    // Pattern 3: Inside price-related HTML elements (class or id containing "price")
-    // Match space or comma separated thousands
+    // Pattern 5: Inside price-related HTML elements (class or id containing "price")
+    // Match space or comma separated thousands, handles both "R 13 000" and "R13 000"
+    /<[^>]*(?:class|id)="[^"]*price[^"]*"[^>]*>.*?R\s+(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/is,
     /<[^>]*(?:class|id)="[^"]*price[^"]*"[^>]*>.*?R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/is,
-    // Pattern 4: R followed by digits with frequency indicator (handles spaces)
+    // Pattern 6: R followed by digits with frequency indicator (handles spaces after R)
+    /R\s+(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))\s*(?:per\s*(month|week|day)|pm|pw|pd|p\/m|p\/w|p\/d)/i,
     /R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))\s*(?:per\s*(month|week|day)|pm|pw|pd|p\/m|p\/w|p\/d)/i,
-    // Pattern 5: Price in span/div with price class (more specific, handles spaces)
+    // Pattern 7: Price in span/div with price class (more specific, handles spaces)
+    /<(?:span|div|p|h[1-6])[^>]*class="[^"]*price[^"]*"[^>]*>[\s\S]*?R\s+(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/is,
     /<(?:span|div|p|h[1-6])[^>]*class="[^"]*price[^"]*"[^>]*>[\s\S]*?R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/is,
-    // Pattern 6: Price with thousands separator (R 12,500 or R12,500 or R 12 500)
+    // Pattern 8: Price with thousands separator (R 12,500 or R12,500 or R 12 500)
+    /R\s+(\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?)/i,
     /R\s*(\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})?)/i,
-    // Pattern 7: Price label format (rent: R12,500 or rent: R12 500)
-    /(?:rent|price)[^:]*:?\s*R?\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/i,
-    // Pattern 8: Price in data attributes (data-price, data-rent, etc.)
-    /(?:data-price|data-rent|data-cost)="[^"]*R?\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"/i,
-    // Pattern 9: Price in meta tags
-    /<meta[^>]*(?:property|name)="[^"]*price[^"]*"[^>]*content="[^"]*R?\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"/i,
-    // Pattern 10: Price in JSON-LD structured data
-    /"price"[^:]*:\s*"?R?\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"?/i,
-    // Pattern 11: Currency symbol variations (fallback - less specific)
-    /(?:R|ZAR|R\s*)\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/i,
-    // Pattern 12: Basic R followed by digits (last resort - most common but least specific)
+    // Pattern 9: Price label format (rent: R 12,500 or rent: R12 500)
+    /(?:rent|price)[^:]*:?\s*R\s+(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/i,
+    /(?:rent|price)[^:]*:?\s*R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/i,
+    // Pattern 10: Price in data attributes (data-price, data-rent, etc.)
+    /(?:data-price|data-rent|data-cost)="[^"]*R\s+(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"/i,
+    /(?:data-price|data-rent|data-cost)="[^"]*R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"/i,
+    // Pattern 11: Price in meta tags
+    /<meta[^>]*(?:property|name)="[^"]*price[^"]*"[^>]*content="[^"]*R\s+(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"/i,
+    /<meta[^>]*(?:property|name)="[^"]*price[^"]*"[^>]*content="[^"]*R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"/i,
+    // Pattern 12: Price in JSON-LD structured data
+    /"price"[^:]*:\s*"?R\s+(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"?/i,
+    /"price"[^:]*:\s*"?R\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))"?/i,
+    // Pattern 13: Currency symbol variations (fallback - less specific)
+    /(?:R|ZAR)\s+(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/i,
+    /(?:R|ZAR)\s*(\d{1,3}(?:\s+\d{3})*|(?:\d{1,3}(?:,\d{3})*))/i,
+    // Pattern 14: Basic R followed by digits (last resort - most common but least specific)
     // Only use this if no thousands separators found
-    /R\s*(\d{4,})/i,  // Only match 4+ digits to avoid matching "R16" when "R16 000" exists
+    /R\s+(\d{4,})/i,  // R followed by space and 4+ digits
+    /R\s*(\d{4,})/i,  // R followed by optional space and 4+ digits
   ];
 
   // Collect all matches and prefer the longest one (most complete price)
-  const matches: { price: number; length: number }[] = [];
+  // This ensures we get "R 13 000" instead of "R13" if both exist
+  const matches: { price: number; length: number; originalText: string }[] = [];
   
   for (const pattern of pricePatterns) {
-    const match = html.match(pattern);
-    if (match && match[1]) {
-      const priceText = match[1].trim();
-      const price = parsePrice(priceText);
-      if (price !== null && price > 0) {
-        matches.push({ price, length: priceText.length });
+    // Use matchAll to find all occurrences, not just the first
+    const flags = pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g';
+    const patternMatches = html.matchAll(new RegExp(pattern.source, flags));
+    for (const match of patternMatches) {
+      if (match && match[1]) {
+        const priceText = match[1].trim();
+        const price = parsePrice(priceText);
+        if (price !== null && price > 0) {
+          // Store the original matched text for debugging and to prefer longer matches
+          matches.push({ 
+            price, 
+            length: priceText.length,
+            originalText: priceText
+          });
+        }
       }
     }
   }
 
-  // Return the longest match (most complete price) or the first valid one
+  // Return the longest match (most complete price) - this ensures "13 000" beats "13"
   if (matches.length > 0) {
-    matches.sort((a, b) => b.length - a.length); // Sort by length descending
+    matches.sort((a, b) => {
+      // First sort by length (longer is better - means more complete price)
+      if (b.length !== a.length) {
+        return b.length - a.length;
+      }
+      // If same length, prefer higher price (more likely to be correct)
+      return b.price - a.price;
+    });
     return matches[0].price;
   }
 
