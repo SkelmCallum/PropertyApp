@@ -7,34 +7,83 @@ on:
     # This runs at: 00:00, 06:00, 12:00, 18:00 UTC
     - cron: '0 */6 * * *'
   workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+    inputs:
+      source:
+        description: 'Property source to scrape (all, private_property, property24, facebook)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - private_property
+          - property24
+          - facebook
+      city:
+        description: 'City to scrape (e.g., cape-town)'
+        required: false
+        default: 'cape-town'
+        type: string
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     name: Trigger Property Scraping
+    timeout-minutes: 10
     steps:
       - name: Trigger Supabase Edge Function
         run: |
-          echo "Triggering property scraping..."
+          echo "🚀 Triggering property scraping..."
+          echo "Source: ${{ github.event.inputs.source || 'all' }}"
+          echo "City: ${{ github.event.inputs.city || 'cape-town' }}"
+          echo ""
           
-          RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST \
+          # Prepare request body
+          SOURCE="${{ github.event.inputs.source || 'all' }}"
+          CITY="${{ github.event.inputs.city || 'cape-town' }}"
+          REQUEST_BODY=$(cat <<EOF
+          {
+            "source": "$SOURCE",
+            "city": "$CITY"
+          }
+          EOF
+          )
+          
+          echo "Making request to Supabase Edge Function..."
+          RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" \
+            --max-time 300 \
+            -X POST \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
-            -d '{"source":"all","city":"cape-town"}' \
+            -d "$REQUEST_BODY" \
             "${{ secrets.SUPABASE_URL }}/functions/v1/scrape-properties")
           
           HTTP_CODE=$(echo "$RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
           BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE:/d')
           
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "Response HTTP Code: $HTTP_CODE"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "Response Body:"
-          echo "$BODY" | jq '.' || echo "$BODY"
           
+          # Try to format JSON if jq is available, otherwise just print
+          if command -v jq &> /dev/null; then
+            echo "$BODY" | jq '.' || echo "$BODY"
+          else
+            echo "$BODY"
+          fi
+          
+          echo ""
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
             echo "✅ Scraping job triggered successfully!"
+            echo "Check your Supabase dashboard to see the results."
             exit 0
           else
             echo "❌ Failed to trigger scraping job (HTTP $HTTP_CODE)"
+            echo "Please check:"
+            echo "  1. SUPABASE_URL secret is correct"
+            echo "  2. SUPABASE_SERVICE_ROLE_KEY secret is correct"
+            echo "  3. Edge function 'scrape-properties' is deployed"
             exit 1
           fi
 
